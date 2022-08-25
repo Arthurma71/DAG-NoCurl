@@ -10,6 +10,7 @@ from pandas import ExcelWriter
 from pandas import ExcelFile
 import os
 from scipy.special import expit as sigmoid
+from sklearn.gaussian_process import GaussianProcessRegressor
 import glob
 import re
 import pickle
@@ -126,11 +127,51 @@ def simulate_sem_nonlinear(G: nx.DiGraph,
         elif sem_type == 'linear-gumbel':
             X[:, j, 0] = eta + np.random.gumbel(scale=noise_scale, size=n)
         else:
-            raise ValueError('unknown sem type')
+            raise ValueError('unknown seokm type')
     if x_dims > 1 :
         for i in range(x_dims-1):
             X[:, :, i+1] = np.random.normal(scale=noise_scale, size=1)*X[:, :, 0] + np.random.normal(scale=noise_scale, size=1) + np.random.normal(scale=noise_scale, size=(n, d))
         X[:, :, 0] = np.random.normal(scale=noise_scale, size=1) * X[:, :, 0] + np.random.normal(scale=noise_scale, size=1) + np.random.normal(scale=noise_scale, size=(n, d))
+    return X
+
+
+def simulate_sem_nonlinear_gp(G, n, sem_type, noise_scale=1):
+    """Simulate samples from nonlinear SEM.
+    Args:
+        B (np.ndarray): [d, d] binary adj matrix of DAG
+        n (int): num of samples
+        sem_type (str): mlp, mim, gp, gp-add
+        noise_scale (np.ndarray): scale parameter of additive noise, default all ones
+    Returns:
+        X (np.ndarray): [n, d] sample matrix
+    """
+
+    
+    def _simulate_single_equation(X, scale, sem_type):
+        """X: [n, num of parents], x: [n]"""
+        if sem_type == 'linear-gauss':
+            z = np.random.normal(scale=scale, size=n)
+        elif sem_type == 'linear-exp':
+            z = np.random.exponential(scale=scale, size=n)
+        elif sem_type == 'linear-gumbel':
+            z = np.random.gumbel(scale=scale, size=n)
+            
+        pa_size = X.shape[1]
+        if pa_size == 0:
+            return z
+        gp = GaussianProcessRegressor()
+        x = gp.sample_y(X, random_state=None).flatten() + z
+        return x
+    
+    W = nx.to_numpy_array(G)
+    d = W.shape[0]
+    scale_vec = noise_scale*np.ones(d)
+    X = np.zeros([n, d])
+    ordered_vertices = list(nx.topological_sort(G))
+    assert len(ordered_vertices) == d
+    for j in ordered_vertices:
+        parents = list(G.predecessors(j))
+        X[:, j] = _simulate_single_equation(X[:, parents], scale_vec[j],sem_type)
     return X
 
 def simulate_sem(G: nx.DiGraph,

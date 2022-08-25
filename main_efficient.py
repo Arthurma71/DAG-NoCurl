@@ -19,7 +19,6 @@ import math
 import scipy.linalg as slin
 import numpy as np
 import networkx as nx
-
 import utils
 import BPR
 
@@ -30,8 +29,8 @@ def get_args():
 
     # -----------data parameters ------
     # configurations
-    parser.add_argument('--data_type', type=str, default= 'synthetic',
-                        choices=['synthetic', 'nonlinear1', 'nonlinear2', 'nonlinear3'],
+    parser.add_argument('--data_type', type=str, default= 'linear',
+                        choices=['linear', 'nonlinear1', 'nonlinear2', 'nonlinear3','nonlinear_gp'],
                         help='choosing which experiment to do.')
     parser.add_argument('--data_sample_size', type=int, default=1000,
                         help='the number of samples of data')
@@ -86,6 +85,12 @@ def get_args():
 
     return args
 
+
+def ensureDir(dir_path):
+
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+
 def main(args):
 
     # Generate and import data
@@ -114,12 +119,16 @@ def main(args):
     repeat_write = [10, 20, 50, 100]
     repeat_counter = 0
 
+    dir_name='./data/' + str(args.data_type)+'/'
+    ensureDir(dir_name)
     for trial_index in tqdm(range(num_trials)):
-        file_name = './data/lineardata/' + str(args.data_sample_size) + '_' + str(args.data_variable_size) + '_' \
+        
+        file_name = dir_name + str(args.data_sample_size) + '_' + str(args.data_variable_size) + '_' \
                     + str(args.graph_type) + '_' + str(args.graph_degree) + '_' \
                     + str(args.graph_sem_type) + '_' + str(trial_index) + '.pkl'
+        
         # load nonlinear data
-        if args.data_type.startswith('nonlinear'):
+        if args.data_type.startswith('nonlinear') and 'gp' not in args.data_type:
             if int(args.data_type[-1]) > 2 :  # nonlinear 3 and others
                 dir = './data/nonlineardata/SFd' + str(args.data_variable_size)
                 index = (int(args.data_type[-1])-1)  * 5  + int(trial_index)
@@ -143,10 +152,15 @@ def main(args):
 
             G = nx.DiGraph(graph)
         elif args.generate_data and not os.path.exists(file_name):
+
             G = utils.simulate_random_dag(d, degree, graph_type)
             G = nx.DiGraph(G)
-            X = utils.simulate_sem(G, args.data_sample_size, sem_type)
-
+            if args.data_type=="linear":
+                X = utils.simulate_sem(G, args.data_sample_size, sem_type)
+            elif args.data_type in ['nonlinear1', 'nonlinear2', 'nonlinear3']:
+                X = utils.simulate_sem_nonlinear(G, args.data_sample_size, sem_type)
+            else :
+                X = utils.simulate_sem_nonlinear_gp(G, args.data_sample_size,sem_type)
             with open(file_name, "wb") as f:
                 pickle.dump( (G, X), f)
 
