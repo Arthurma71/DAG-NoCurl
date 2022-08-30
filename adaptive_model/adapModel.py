@@ -59,6 +59,7 @@ class adaptiveMLP(nn.Module):
         reg += torch.sum(self.fc2.weight**2)
         return reg
 
+
 def adap_reweight_step(adp_model, train_loader, lambda1, notears_model, epoch_num, lrate):
     loop = tqdm.tqdm(range(epoch_num))
     
@@ -68,7 +69,7 @@ def adap_reweight_step(adp_model, train_loader, lambda1, notears_model, epoch_nu
             gumble_G = torch.rand(X.shape[0],1)
             # W_star = W_star.to(X.device)
             with torch.no_grad():
-                X_hat = notears_model(X)
+                X_hat = notears_model.predict(X)
             optimizer = torch.optim.Adam(adp_model.parameters(), lr=lrate)
             R = X - X_hat
             R = R.to(X.device)
@@ -91,6 +92,10 @@ def adap_reweight_step(adp_model, train_loader, lambda1, notears_model, epoch_nu
     
     
     return reweight_list
+
+
+
+
 
 
 # 测试上述的模型

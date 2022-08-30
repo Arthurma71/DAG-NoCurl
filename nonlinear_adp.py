@@ -1,4 +1,5 @@
 from cProfile import run
+from turtle import goto
 from sympy import re
 from notears.locally_connected import LocallyConnected
 from notears.trace_expm import trace_expm
@@ -96,6 +97,9 @@ class NotearsMLP(nn.Module):
         """Take l1 norm of fc1 weight"""
         reg = torch.sum(self.fc1_pos.weight + self.fc1_neg.weight)
         return reg
+    
+    def predict(self,x):
+        return self.forward(x)
 
     @torch.no_grad()
     def fc1_to_adj(self) -> np.ndarray:  # [j * m1, i] -> [i, j]
@@ -107,6 +111,70 @@ class NotearsMLP(nn.Module):
         W = torch.sqrt(A)  # [i, j]
         W = W.cpu().detach().numpy()  # [i, j]
         return W
+
+class GOLEM(nn.Module):
+    """Set up the objective function of GOLEM.
+    Hyperparameters:
+        (1) GOLEM-NV: lambda_1=2e-3, lambda_2=5.0.
+        (2) GOLEM-EV: lambda_1=2e-2, lambda_2=5.0.(not used)
+    """
+
+    def __init__(self, args):
+        super(GOLEM, self).__init__()
+        self.n = args.n
+        self.d = args.d
+        self.lambda_1 = args.lambda1
+        self.lambda_2 = args.lambda2
+        self.W=nn.Linear(args.d, args.d, bias=False)
+        self.lr=args.golem_lr
+        nn.init.zeros_(self.W.weight)
+        #self.W.weight.fill_diagonal_(0)
+    
+    def predict(self,X):
+        return self.W(X)
+    
+
+    def forward(self, X, weight):
+
+        likelihood = self._compute_likelihood(X,weight)
+        L1_penalty = self._compute_L1_penalty()
+        h = self._compute_h()
+        loss= likelihood + self.lambda_1 * L1_penalty + self.lambda_2 * h
+        return loss, likelihood, self.lambda_1 * L1_penalty, self.lambda_2 * h
+
+    def _compute_likelihood(self,X,weight):
+        """Compute (negative log) likelihood in the linear Gaussian case.
+        Returns:
+            tf.Tensor: Likelihood term (scalar-valued).
+        """
+        return 0.5 * torch.sum(
+            torch.log(
+                torch.sum(
+                    torch.square(X - self.W(X)), axis=0
+                )
+            )*weight
+        ) - torch.linalg.slogdet(torch.eye(self.d) - self.W.weight)[1]
+
+    def _compute_L1_penalty(self):
+        """Compute L1 penalty.
+        Returns:
+            tf.Tensor: L1 penalty term (scalar-valued).
+        """
+        return torch.norm(self.W.weight, 1)
+
+    def _compute_h(self):
+        """Compute DAG penalty.
+        Returns:
+            tf.Tensor: DAG penalty term (scalar-valued).
+        """
+        return torch.trace(torch.matrix_exp(self.W.weight * self.W.weight)) - self.d
+    
+    @torch.no_grad()
+    def W_to_adj(self) -> np.ndarray:  # [j * m1, i] -> [i, j]
+        """Get W from fc1 weights, take 2-norm over m1 dim"""
+        w = self.W.weight.cpu().detach().numpy()  # [i, j]
+        return w
+
 
 # TODO: create the adaptive_loss function
 def adaptive_loss(output, target, reweight_list):
@@ -137,6 +205,65 @@ def record_distribution(reweight_list,j):
     plt.boxplot(reweight_idx)
     # 保存图片
     plt.savefig(f'logs/box_plot{j}.png')
+
+
+def dual_ascent_step_golem(model, train_loader, adp_flag, adaptive_model, max_epochs):
+    print(train_loader)
+
+    for epoch in range(max_epochs):
+        global COUNT
+        COUNT += 1
+        
+        optimizer = torch.optim.Adam([ param for param in model.parameters() if param.requires_grad == True], lr=model.lr)
+
+        primal_obj = torch.tensor(0.).to(args.device)
+        tot_loss = torch.tensor(0.).to(args.device)
+        tot_likelihood = torch.tensor(0.).to(args.device)
+        tot_L1 = torch.tensor(0.).to(args.device)
+        tot_h = torch.tensor(0.).to(args.device)
+
+        for _ , tmp_x in enumerate(train_loader):
+            batch_x = tmp_x[0].to(args.device)
+            batch_x = batch_x - torch.mean(batch_x)
+            X_hat = model.predict(batch_x)
+            
+            # TODO: the adaptive loss should add here
+            if adp_flag == False or IF_baseline == False:
+                reweight_list = torch.ones(batch_x.shape[0],1)/batch_x.shape[0]
+                reweight_list = reweight_list.to(args.device)
+            else:
+                with torch.no_grad():
+                    model.eval()
+                    reweight_list = adaptive_model((batch_x-X_hat)**2)
+                # TODO: record the reweight
+                if IF_figure:
+                    record_weight(reweight_list=reweight_list, cnt=COUNT, hard_list=[748,181,276,151,355,137,846,671], easy_list=[802,673,317,192,167])
+                
+                model.train()
+            # print(reweight_list.squeeze(1))
+            
+            loss, likelihood, L1_penalty, h = model(batch_x,reweight_list)#adaptive_loss(X_hat, batch_x, reweight_list)
+            tot_loss+=loss
+            tot_likelihood+=likelihood
+            tot_L1+=L1_penalty
+            tot_h+=h
+        
+        optimizer.zero_grad()
+        tot_loss.backward()
+        optimizer.step()
+        #print(model.W.weight)
+        h_cur = model._compute_h().detach().item()
+        perf_str='Epoch %d : training loss ==[%.5f = %.5f + %.5f +  %.5f], curr H: %.5f' % (
+                epoch, tot_loss.detach().item(),tot_likelihood.detach().item(), 
+                tot_L1.detach().item(), tot_h.detach().item(), h_cur)
+        
+        print(perf_str)
+       
+    
+    return h
+
+    
+
     
 def dual_ascent_step(model, X, train_loader, lambda1, lambda2, rho, alpha, h, rho_max, adp_flag, adaptive_model):
     """Perform one step of dual ascent in augmented Lagrangian."""
@@ -213,6 +340,49 @@ def dual_ascent_step(model, X, train_loader, lambda1, lambda2, rho, alpha, h, rh
     alpha += rho * h_new
     return rho, alpha, h_new
 
+def golem_linear(model: nn.Module,
+                      adaptive_model: nn.Module,
+                      X: np.ndarray,
+                      train_loader: data.DataLoader,
+                      lambda1: float = 0.,
+                      lambda2: float = 0.,
+                      max_iter: int = 10,
+                      h_tol: float = 1e-8,
+                      rho_max: float = 1e+16,
+                      w_threshold: float = 0.3,
+                      duel_epoch: int = 10
+                      ):
+    adp_flag = False
+    for j in tqdm.tqdm(range(max_iter)):
+        if j > args.reweight_epoch:
+            print("Re-weighting")
+            # TODO: reweight operation here
+            adp_flag = True
+            if not IF_baseline:
+                reweight_idx_tmp = adap_reweight_step(adaptive_model, train_loader, args.adaptive_lambda , model, args.adaptive_epoch, args.adaptive_lr)
+                # TODO: record the distribution
+                
+                if IF_figure:
+                    record_distribution(reweight_idx_tmp,j)    
+            h=dual_ascent_step_golem(model, train_loader, adp_flag, adaptive_model, duel_epoch)
+        else:
+            h=dual_ascent_step_golem(model, train_loader, adp_flag, adaptive_model, duel_epoch)
+        
+        if h <= h_tol:
+            break
+    
+
+    W_est = model.W_to_adj()
+ 
+    W_est[np.abs(W_est) < w_threshold] = 0
+    print(W_est)
+    # TODO: 打印fit不好的结果和相关信息
+    hard_index, easy_index = hard_mining(X, model, single_loss, ratio=0.01)
+    # 分别将hard和easy的索引保存到txt文件中
+    # np.savetxt(f'hard{args.seed}.txt', hard_index, fmt='%d')
+    # np.savetxt(f'easy{args.seed}.txt', easy_index, fmt='%d')
+    return W_est, hard_index, easy_index
+
 
 def notears_nonlinear(model: nn.Module,
                       adaptive_model: nn.Module,
@@ -235,7 +405,6 @@ def notears_nonlinear(model: nn.Module,
             if not IF_baseline:
                 reweight_idx_tmp = adap_reweight_step(adaptive_model, train_loader, args.adaptive_lambda , model, args.adaptive_epoch, args.adaptive_lr)
                 # TODO: record the distribution
-                
                 if IF_figure:
                     record_distribution(reweight_idx_tmp,j)
                 
@@ -270,7 +439,7 @@ def hard_mining(data, model, loss_func, ratio = 0.01):
     """
     N_sample = data.shape[0]
     model.eval()
-    data_hat = model(data)
+    data_hat = model.predict(data)
     loss_col = loss_func(data_hat, data)
     loss_col = torch.sum(loss_col, dim=1)
     loss_col = loss_col.cpu().detach().numpy()
@@ -287,57 +456,84 @@ def main():
     import notears.utils as ut
     set_random_seed(args.seed)
 
-    if args.data_type == 'real':
-        # X = np.loadtxt('/opt/data2/git_fangfu/JTT_CD/data/sachs.csv', delimiter=',')
-        X = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs.csv', delimiter=',')
-        B_true = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs_B_true.csv', delimiter=',')
-        model = NotearsMLP(dims=[11, 1], bias=True) # for the real data (sachs)   the nodes of sachs are 11
-        adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
+    linearity = "non-linear"
 
-    elif args.data_type == 'synthetic':
+    if args.use_golem:
         B_true = ut.simulate_dag(args.d, args.s0, args.graph_type)
-        X = ut.simulate_nonlinear_sem(B_true, args.n, args.sem_type)
-        model = NotearsMLP(dims=[args.d, 10, 1], bias=True) # FIXME: the layer of the Notears MLP
+        X = ut.simulate_linear_sem(B_true, args.n, args.linear_sem_type)
+        model = GOLEM(args) # FIXME: the layer of the Notears MLP
         adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
-    
-    elif args.data_type == 'testing':
-        B_true = np.loadtxt('testing_B_true.csv', delimiter=',')
-        X = np.loadtxt('testing_X.csv', delimiter=',')
-        model = NotearsMLP(dims=[args.d ,10, 1], bias=True) # FIXME: the layer of the Notears MLP
-        adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
-    
-    elif args.data_type == 'sachs_full':
-        X = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs7466.csv', delimiter=',')
-        B_true = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs_B_true.csv', delimiter=',')
-        model = NotearsMLP(dims=[11, 1], bias=True) # for the real data (sachs)   the nodes of sachs are 11
-        adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
+        linearity = "linear"
+    else:
+        if args.data_type == 'real':
+            # X = np.loadtxt('/opt/data2/git_fangfu/JTT_CD/data/sachs.csv', delimiter=',')
+            X = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs.csv', delimiter=',')
+            B_true = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs_B_true.csv', delimiter=',')
+            model = NotearsMLP(dims=[11, 1], bias=True) # for the real data (sachs)   the nodes of sachs are 11
+            adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
+            linearity = "linear"
+
+        elif args.data_type == 'synthetic':
+            
+
+            B_true = ut.simulate_dag(args.d, args.s0, args.graph_type)
+            if args.linear:
+                linearity='linear'
+                X = ut.simulate_linear_sem(B_true, args.n, args.linear_sem_type)
+            else:
+                X = ut.simulate_nonlinear_sem(B_true, args.n, args.sem_type)
+            model = NotearsMLP(dims=[args.d, 10, 1], bias=True) # FIXME: the layer of the Notears MLP
+            adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
         
+        elif args.data_type == 'testing':
+            B_true = np.loadtxt('testing_B_true.csv', delimiter=',')
+            X = np.loadtxt('testing_X.csv', delimiter=',')
+            model = NotearsMLP(dims=[args.d ,10, 1], bias=True) # FIXME: the layer of the Notears MLP
+            adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
+
+        elif args.data_type == 'sachs_full':
+            X = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs7466.csv', delimiter=',')
+            B_true = np.loadtxt('/opt/data2/git_fangfu/notears/sachs_data/sachs_B_true.csv', delimiter=',')
+            model = NotearsMLP(dims=[11, 1], bias=True) # for the real data (sachs)   the nodes of sachs are 11
+            adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
+    
+
+    datatype = args.data_type if not args.use_golem else 'synthetic'
+
+    sem_type = args.sem_type if linearity=="non-linear" else args.linear_sem_type
+    
+     
     X = torch.from_numpy(X).float().to(args.device)
     model.to(args.device)
     
     # TODO: 将X装入DataLoader
     X_data = data.TensorDataset(X)
     train_loader = data.DataLoader(X_data, batch_size=args.batch_size, shuffle=True)
-
-    W_est , _, _= notears_nonlinear(model, adaptive_model, X, train_loader, args.lambda1, args.lambda2)
-    assert ut.is_dag(W_est)
+    if args.use_golem:
+        W_est , _, _= golem_linear(model, adaptive_model, X, train_loader, args.lambda1, args.lambda2, duel_epoch=args.duel_epoch)
+    else:
+        W_est , _, _= notears_nonlinear(model, adaptive_model, X, train_loader, args.lambda1, args.lambda2)
+    #assert ut.is_dag(W_est)
     # np.savetxt('W_est.csv', W_est, delimiter=',')
     acc = ut.count_accuracy(B_true, W_est != 0)
     print(acc)
     # 根据args.d和args.s0生成文件夹
+    f_dir=f'reweight_experiment/{linearity}/{args.d}_{args.s0}/{args.graph_type}_{sem_type}/'
+    f_path=f'reweight_experiment/{linearity}/{args.d}_{args.s0}/{args.graph_type}_{sem_type}/seed_{args.seed}.txt'
     import os
-    if not os.path.exists(f'reweight_experiment/{args.d}_{args.s0}/{args.graph_type}_{args.sem_type}'):
-        os.makedirs(f'reweight_experiment/{args.d}_{args.s0}/{args.graph_type}_{args.sem_type}')
+    if not os.path.exists(f_dir):
+        os.makedirs(f_dir)
     # 创建该'my_experiment/{args.d}_{args.s0}/{args.graph_type}_{args.sem_type}/{args.seed}.txt'该文件
 
     if args.data_type == 'synthetic':
-        with open(f'reweight_experiment/{args.d}_{args.s0}/{args.graph_type}_{args.sem_type}/seed_{args.seed}.txt', 'a') as f:
+        with open(f_path, 'a') as f:
             f.write(f'run_mode: {IF_baseline}\n')
             f.write(f'observation_num: {args.n}\n')
             if not IF_baseline:
                 f.write(f'temperature: {args.temperature}\n')
                 f.write(f'batch_size:{args.batch_size}\n')
             f.write(f'dataset_type:{args.data_type}\n')
+            f.write(f'is_golem:{args.use_golem}\n')
             f.write(f'acc:{acc}\n')
             f.write('-----------------------------------------------------\n')
     
