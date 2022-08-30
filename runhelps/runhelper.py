@@ -7,8 +7,8 @@ def config_parser():
     parser.add_argument('--device', default='cpu', help='cuda or cpu')
 
     parser.add_argument("--s0", default=40, type=int)
-    parser.add_argument("--d", default=20, type=int) # 如果是10 下面的n就是1000, 如果是20就是2000, 如果d>50, n最好加大
-    parser.add_argument("--n", default=2000, type=int)
+    parser.add_argument("--d", default=10, type=int) # 如果是10 下面的n就是1000, 如果是20就是2000, 如果d>50, n最好加大
+    parser.add_argument("--n", default=1000, type=int)
     parser.add_argument("--sem_type", default="gp", choices=["gp-add","mlp", "gp", "mim"])
     parser.add_argument("--linear_sem_type", default="gauss", choices=["gauss","exp", "gumbel", "uniform","logistic","poisson"])
     parser.add_argument("--graph_type", default='ER', choices=['SF', 'ER', 'BA'])
@@ -29,12 +29,12 @@ def config_parser():
 
     # TODO: add the arguments for adapitve reweight ， 默认fit好的参数，t = 20, 10, batch=200, adaptive_epoch=10
     # add the batch_size
-    parser.add_argument("--run_mode", type = int, default=0, help =" run baseline or reweight operation")
-    parser.add_argument('--batch_size', type=int, default=500, help='batch_size')
+    parser.add_argument("--run_mode", type = int, default=1, help =" run baseline or reweight operation")
+    parser.add_argument('--batch_size', type=int, default=200, help='batch_size')
     parser.add_argument('--reweight_epoch', type=int, default=0, help='the epoch begin to reweight')
     
     parser.add_argument('--temperature', type=int, default=20, help='softmax_tmperature')
-    parser.add_argument("--adaptive_epoch", default=100, type=int, help="number of iterations for adaptive reweight")
+    parser.add_argument("--adaptive_epoch", default=20, type=int, help="number of iterations for adaptive reweight")
     parser.add_argument("--adaptive_lr", default=0.001, type=float, help="learning rate for adaptive reweight")
     parser.add_argument("--adaptive_lambda", default=0.001, type=float, help="adaptive lambda for l1 regularization")   
 
