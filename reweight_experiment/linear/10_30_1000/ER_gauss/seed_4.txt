@@ -14,3 +14,19 @@ dataset_type:synthetic
 is_golem:True
 acc:{'fdr': 0.38095238095238093, 'tpr': 0.8666666666666667, 'fpr': 1.0666666666666667, 'shd': 19, 'nnz': 42}
 -----------------------------------------------------
+args:Namespace(adaptive_epoch=20, adaptive_lambda=0.001, adaptive_lr=0.001, batch_size=200, beta=0.9, config=None, d=10, data_dir='data', data_type='synthetic', device='cpu', duel_epoch=10, golem_lr=0.001, graph_type='ER', lambda1=0.002, lambda2=500.0, linear=False, linear_sem_type='gauss', n=1000, reweight=False, reweight_epoch=0, run_mode=0, s0=30, seed=0, sem_type='gp', temperature=20, trial=10, use_golem=True, w_threshold=0.3)
+run_mode: 0
+observation_num: 1000
+temperature: 20
+batch_size:200
+dataset_type:synthetic
+is_golem:True
+acc:{'fdr': 0.38095238095238093, 'tpr': 0.8666666666666667, 'fpr': 1.0666666666666667, 'shd': 19, 'nnz': 42}
+-----------------------------------------------------
+args:Namespace(adaptive_epoch=20, adaptive_lambda=0.001, adaptive_lr=0.001, batch_size=200, beta=0.9, config=None, d=10, data_dir='data', data_type='synthetic', device='cpu', duel_epoch=10, golem_lr=0.001, graph_type='ER', lambda1=0.002, lambda2=500.0, linear=False, linear_sem_type='gauss', n=1000, reweight=False, reweight_epoch=0, run_mode=1, s0=30, seed=0, sem_type='gp', temperature=20, trial=10, use_golem=True, w_threshold=0.3)
+run_mode: 1
+observation_num: 1000
+dataset_type:synthetic
+is_golem:True
+acc:{'fdr': 0.38095238095238093, 'tpr': 0.8666666666666667, 'fpr': 1.0666666666666667, 'shd': 19, 'nnz': 42}
+-----------------------------------------------------
