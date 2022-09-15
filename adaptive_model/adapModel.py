@@ -1,4 +1,5 @@
 import imp
+from multiprocessing.dummy.connection import families
 from random import seed
 import torch 
 import torch.nn as nn
@@ -60,40 +61,55 @@ class adaptiveMLP(nn.Module):
         return reg
 
 
-def adap_reweight_step(adp_model, train_loader, lambda1, notears_model, epoch_num, lrate):
+def adap_reweight_step(args,adp_model, train_loader, lambda1, model, epoch_num, lrate):
     loop = tqdm.tqdm(range(epoch_num))
     
+    
     for epoch in loop:
+        reweight_list = []
+        R_list=[]
+        idx=[]
         for i, data in enumerate(train_loader):
             X = data[0]
             gumble_G = torch.rand(X.shape[0],1)
             # W_star = W_star.to(X.device)
-            with torch.no_grad():
-                X_hat = notears_model.predict(X)
+            
             optimizer = torch.optim.Adam(adp_model.parameters(), lr=lrate)
-            R = X - X_hat
-            R = R.to(X.device)
-            reweight_list = []
+            if args.modeltype!="grandag":
+                with torch.no_grad():
+                    X_hat = model.predict(X)
+                R = X - X_hat
+                R = R.to(X.device)
+            else:
+                weights, biases, extra_params = model.get_parameters(mode="wbx")
+                log_likelihood=model.compute_log_likelihood(X, weights, biases, extra_params)
+                #likelihood=torch.exp(log_likelihood)
+                R = -log_likelihood
+                R = R.to(X.device)
+
+
             optimizer.zero_grad()
             reweight_list = adp_model(R**2) # FIXME: 注意这里的输入和在主函数训练的输入的一致性，要么都是R,要么都是X
             # loss 要加上了l1正则项
-            
-            loss = -0.5*torch.sum(torch.mul(reweight_list, R**2)) + lambda1*adp_model.adaptive_l2_reg()
+            R_list = R**2 if args.modeltype!="grandag" else R
+            idx=data[1]
+            if args.modeltype!="grandag":
+                loss = -0.5*torch.sum(torch.mul(reweight_list, R**2)) + lambda1*adp_model.adaptive_l2_reg()
+            else:
+                loss = torch.mean(torch.mul(reweight_list,log_likelihood)) + lambda1*adp_model.adaptive_l2_reg()
             loss.backward()
             optimizer.step()
             loop.set_postfix(adaptive_loss=loss.item())
             # for param in adp_model.fc1.parameters():
             #     # 打印梯度
             #     print(param.grad)
-
+    #print(reweight_list)
     print(f'avg:{torch.mean(reweight_list)}')
     print(f'max:{torch.max(reweight_list).item()}')
     print(f'min:{torch.min(reweight_list).item()}')
     
     
-    return reweight_list
-
-
+    return reweight_list,R_list,idx
 
 
 
