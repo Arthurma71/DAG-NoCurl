@@ -1,5 +1,4 @@
 *.pyc
 *.pkl
-*.npy
 .DS_Store
 *.tar
