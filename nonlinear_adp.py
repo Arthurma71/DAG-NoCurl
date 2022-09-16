@@ -147,6 +147,7 @@ def notears_nonlinear(model: nn.Module,
                       rho_max: float = 1e+16,
                       w_threshold: float = 0.3
                       ):
+    #print([param.device for param in model.parameters()])
     rho, alpha, h = 1.0, 0.0, np.inf
     adp_flag = False
     for j in tqdm.tqdm(range(max_iter)):
@@ -167,7 +168,7 @@ def notears_nonlinear(model: nn.Module,
             rho, alpha, h = dual_ascent_step(args, model, X, train_loader, lambda1, lambda2,
                                          rho, alpha, h, rho_max, adp_flag, adaptive_model)
         
-        print(h, rho, alpha)
+        #print(h, rho, alpha)
         if h <= h_tol or rho >= rho_max:
             break
     W_est = model.fc1_to_adj()
@@ -339,6 +340,8 @@ def hard_mining(args, data, model, loss_func, ratio = 0.01):
     """
     data: (N_observations, nodes)
     """
+    data.to(args.device)
+    model.to(args.device)
     N_sample = data.shape[0]
     model.eval()
     if args.modeltype!="grandag":
@@ -419,11 +422,13 @@ def main(trials,seed):
         if args.scaled_noise:
             sem_type+="_scaled"
 
-        
 
+        
+        
         data_dir=f'data/{linearity}/{sem_type}/'
         ensureDir(data_dir)
 
+        
         
         if not args.scaled_noise:
             data_name=f'{args.d}_{args.s0}_{args.n}_{cur_seed}'
@@ -485,10 +490,12 @@ def main(trials,seed):
         if not os.path.exists(f_dir):
             os.makedirs(f_dir)
         
-        
         X = torch.from_numpy(X).float().to(args.device)
         model.to(args.device)
-        
+        #print([(param.name,param.device) for param in model.parameters()])
+
+
+    
         # TODO: 将X装入DataLoader
         X_data = TensorDatasetIndexed(X)
         train_loader = data.DataLoader(X_data, batch_size=args.batch_size, shuffle=True)

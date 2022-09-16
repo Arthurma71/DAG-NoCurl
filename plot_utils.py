@@ -108,3 +108,66 @@ def plot_adjacency(adjacency, gt_adjacency, exp_path, name=''):
     ax3.set_aspect('equal', adjustable='box')
 
     plt.savefig(os.path.join(exp_path, 'adjacency' + name + '.png'))
+
+if __name__ == '__main__':
+    
+
+    import os
+    import json
+    xs=[]
+    ys={}
+    method="notears"
+    reweight="reweight"
+    setting="10_40_2000"
+
+    path=f"/storage/wcma/DAG-NoCurl/reweight_experiment/non-linear/{setting}/ER_gp"
+    for file in os.listdir(path):
+        if file.endswith(f"{method}_{reweight}.json"):
+            xs.append(float(file.split("_")[1]))
+            abs_path=os.path.join(path, file)
+            with open(abs_path) as f:
+                data=json.load(f)
+            for key,value in data.items():
+                if key not in ys:
+                    ys[key]=[[],[]]
+                ys[key][0].append(value['mean'])
+                ys[key][1].append(value['std'])
+    
+    xs_ori=[]
+    ys_ori={}
+    for file in os.listdir(path):
+        if file.endswith(f"{method}.json"):
+            xs_ori.append(float(file.split("_")[1]))
+            abs_path=os.path.join(path, file)
+            with open(abs_path) as f:
+                data=json.load(f)
+            for key,value in data.items():
+                if key not in ys_ori:
+                    ys_ori[key]=[[],[]]
+                ys_ori[key][0].append(value['mean'])
+                ys_ori[key][1].append(value['std'])
+    
+    idx=np.argsort(np.array(xs))
+    idx_ori=np.argsort(np.array(xs_ori))
+    xs=np.array(xs)[idx]
+    xs_ori=np.array(xs_ori)[idx_ori]
+
+    plt.figure(figsize=(16,8))
+    cnt=0
+    for key,item in ys.items():
+        plt.subplot(f"23{cnt}")
+        means=np.array(item[0])[idx]
+        stds=np.array(item[1])[idx]
+        means_ori=np.array(ys_ori[key][0])[idx_ori]
+        stds_ori=np.array(ys_ori[key][1])[idx_ori]
+        plt.errorbar(xs, means, yerr=stds,color='r',fmt='-o',label=method+"_reweight")
+        plt.errorbar(xs_ori, means_ori, yerr=stds_ori,color='b',fmt='-o',label=method)
+        plt.title(key)
+        plt.legend()
+        cnt+=1
+    plt.suptitle(setting)
+    plt.savefig(os.path.join(path,"final.jpg"))
+    plt.cla()
+        
+
+        
