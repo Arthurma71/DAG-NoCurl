@@ -7,9 +7,10 @@ import torch.nn.functional as F
 import numpy as np
 import tqdm as tqdm
 
+
 class adaptiveMLP(nn.Module):
     # TODO: implementation ：平滑处理设计
-    def __init__(self, batch, input_size, hidden_size, output_size, temperature, bias=True):
+    def __init__(self, batch, input_size, hidden_size, output_size, temperature, bias=True,device='cpu'):
         super(adaptiveMLP, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size, bias=bias)
         self.fc2 = nn.Linear(hidden_size, output_size, bias=bias)
@@ -22,6 +23,7 @@ class adaptiveMLP(nn.Module):
         # self.noise = torch.rand(batch,1)
         self.eps = torch.tensor(1e-6)
         self.t = temperature
+        self.device=device
         # self.t = 200000
         # self.norm = nn.L2Norm(p=2, dim=1)
         # 是否针对relu函数的权重初始化
@@ -39,7 +41,7 @@ class adaptiveMLP(nn.Module):
         # x = self.sigmoid(x)
         # x = x - torch.mean(x)
         # x = x / torch.std(x)
-        gumble_G = torch.rand(x.shape[0],1)
+        gumble_G = torch.rand(x.shape[0],1).to(self.device)
         x = x - torch.log(-torch.log(gumble_G))
         x = self.softmax_temp(x/self.t)
         # x = torch.abs(x)
@@ -59,6 +61,7 @@ class adaptiveMLP(nn.Module):
         reg += torch.sum(self.fc1.weight**2)
         reg += torch.sum(self.fc2.weight**2)
         return reg
+
 
 
 def adap_reweight_step(args,adp_model, train_loader, lambda1, model, epoch_num, lrate):

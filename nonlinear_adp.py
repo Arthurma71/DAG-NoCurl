@@ -303,14 +303,13 @@ def grandag_nonlinear(model: nn.Module,
     thresholds = np.unique(W_est_pre)
     for step, t in enumerate(thresholds):
         #print("Edges/thresh", model.adjacency.sum(), t)
-        to_keep = torch.Tensor(W_est_pre > t + 1e-8)
+        to_keep = torch.Tensor(W_est_pre > t + 1e-8).to(model.device)
         new_adj = model.adjacency * to_keep
-
-        if is_acyclic(new_adj):
+        if is_acyclic(new_adj.cpu().detach()):
             model.adjacency.copy_(new_adj)
             break
 
-    W_est = model.adjacency
+    W_est = model.adjacency.cpu().detach().numpy().astype(np.float32)
 
     print(W_est)
     acc = ut.count_accuracy(true_graph, W_est != 0)
@@ -377,7 +376,10 @@ def main(trials,seed):
             if args.data_type == 'real' or args.data_type == 'sachs_full':
                 model = NotearsMLP(dims=[11, 1], bias=True) # for the real data (sachs)   the nodes of sachs are 11
             else:
-                model = NotearsMLP(dims=[args.d, 10, 1], bias=True)
+                if args.linear:
+                    model = NotearsMLP(dims=[args.d, 1], bias=True)
+                else:
+                    model = NotearsMLP(dims=[args.d, 10, 1], bias=True)
         elif args.modeltype=="golem":
             model = GOLEM(args)
         elif args.modeltype=="daggnn":
@@ -387,11 +389,11 @@ def main(trials,seed):
         elif args.modeltype=="grandag":
             if args.gran_model == "NonLinGauss":
                 model = LearnableModel_NonLinGauss(args.d, args.gran_layers, args.gran_hid_dim, nonlin=args.nonlin,
-                                                norm_prod=args.norm_prod, square_prod=args.square_prod)
+                                                norm_prod=args.norm_prod, square_prod=args.square_prod,device=args.device)
             elif args.gran_model == "NonLinGaussANM":
                 model = LearnableModel_NonLinGaussANM(args.d, args.gran_layers, args.granhid_dim, nonlin=args.nonlin,
                                                     norm_prod=args.norm_prod,
-                                                    square_prod=args.square_prod)        
+                                                    square_prod=args.square_prod,device=args.device)        
 
         noise_scale=None
         if args.scaled_noise:
@@ -425,7 +427,7 @@ def main(trials,seed):
 
         
         
-        data_dir=f'data/{linearity}/{sem_type}/'
+        data_dir=f'data/{linearity}/{args.graph_type}_{sem_type}/'
         ensureDir(data_dir)
 
         
@@ -481,7 +483,7 @@ def main(trials,seed):
 
 
 
-        adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature).to(args.device)
+        adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature,device=args.device).to(args.device)
 
        
         #print(B_true)

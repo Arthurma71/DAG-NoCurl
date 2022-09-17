@@ -112,6 +112,8 @@ class NotearsMLP(nn.Module):
         W = W.cpu().detach().numpy()  # [i, j]
         return W
 
+
+
 class GOLEM(nn.Module):
     """Set up the objective function of GOLEM.
     Hyperparameters:
@@ -187,6 +189,8 @@ class GOLEM(nn.Module):
         """Get W from fc1 weights, take 2-norm over m1 dim"""
         w = self.W.weight.T.cpu().detach().numpy()  # [i, j]
         return w
+
+
 
 class DAGGNN_MLPEncoder(nn.Module):
     """MLP encoder module."""
@@ -299,6 +303,8 @@ class DAGGNN(nn.Module):
     def get_adj(self):
         return self.best_NLL_graph
 
+
+
 class TrExpScipy(torch.autograd.Function):
     """
     autograd.Function to compute trace of an exponential of a matrix
@@ -306,13 +312,14 @@ class TrExpScipy(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, input):
+        device=input.device
         with torch.no_grad():
             # send tensor to cpu in numpy format and compute expm using scipy
             expm_input = expm(input.detach().cpu().numpy())
             # transform back into a tensor
             expm_input = torch.as_tensor(expm_input)
             if input.is_cuda:
-                # expm_input = expm_input.cuda()
+                expm_input = expm_input.to(device)
                 assert expm_input.is_cuda
             # save expm_input to use in backward
             ctx.save_for_backward(expm_input)
@@ -333,9 +340,9 @@ def compute_constraint(model, w_adj):
 
 def compute_A_phi(model, norm="none", square=False):
         weights = model.get_parameters(mode='w')[0]
-        prod = torch.eye(model.num_vars)
+        prod = torch.eye(model.num_vars).to(model.device)
         if norm != "none":
-            prod_norm = torch.eye(model.num_vars)
+            prod_norm = torch.eye(model.num_vars).to(model.device)
         for i, w in enumerate(weights):
             if square:
                 w = w ** 2
@@ -344,7 +351,7 @@ def compute_A_phi(model, norm="none", square=False):
             if i == 0:
                 prod = torch.einsum("tij,ljt,jk->tik", w, model.adjacency.unsqueeze(0), prod)
                 if norm != "none":
-                    tmp = 1. - torch.eye(model.num_vars).unsqueeze(0)
+                    tmp = 1. - torch.eye(model.num_vars).unsqueeze(0).to(model.device)
                     prod_norm = torch.einsum("tij,ljt,jk->tik", torch.ones_like(w).detach(), tmp, prod_norm)
             else:
                 prod = torch.einsum("tij,tjk->tik", w, prod)
@@ -354,8 +361,8 @@ def compute_A_phi(model, norm="none", square=False):
         # sum over density parameter axis
         prod = torch.sum(prod, 1)
         if norm == "paths":
-            prod_norm = torch.sum(prod_norm, 1)
-            denominator = prod_norm + torch.eye(model.num_vars)  # avoid / 0 on diagonal
+            prod_norm = torch.sum(prod_norm, 1).to(model.device)
+            denominator = prod_norm + torch.eye(model.num_vars).to(model.device)  # avoid / 0 on diagonal
             return (prod / denominator).t()
         elif norm == "none":
             return prod.t()
@@ -364,7 +371,7 @@ def compute_A_phi(model, norm="none", square=False):
 
 class BaseModel(nn.Module):
     def __init__(self, num_vars, num_layers, hid_dim, num_params, nonlin="leaky-relu", norm_prod='path',
-                 square_prod=False):
+                 square_prod=False,device='cpu'):
         """
 
         :param num_vars: number of variables in the system
@@ -381,13 +388,16 @@ class BaseModel(nn.Module):
         self.nonlin = nonlin
         self.norm_prod = norm_prod
         self.square_prod = square_prod
+        self.device = device
 
         self.weights = nn.ParameterList()
         self.biases = nn.ParameterList()
         self.extra_params = []  # Those parameter might be learnable, but they do not depend on parents.
 
         # initialize current adjacency matrix
-        self.adjacency = torch.ones((self.num_vars, self.num_vars)) - torch.eye(self.num_vars)
+        self.adjacency = nn.Parameter(torch.ones((self.num_vars, self.num_vars)) - torch.eye(self.num_vars), requires_grad=False)
+
+        #self.adjacency=self.adjacency.to(self.device)
 
         self.zero_weights_ratio = 0.
         self.numel_weights = 0
@@ -417,7 +427,7 @@ class BaseModel(nn.Module):
         for k in range(self.num_layers + 1):
             # apply affine operator
             if k == 0:
-                adj = self.adjacency.unsqueeze(0)
+                adj = self.adjacency.unsqueeze(0).to(self.device)
                 x = torch.einsum("tij,ljt,bj->bti", weights[k], adj, x) + biases[k]
             else:
                 x = torch.einsum("tij,btj->bti", weights[k], x) + biases[k]
@@ -542,9 +552,9 @@ class BaseModel(nn.Module):
 
 class LearnableModel(BaseModel):
     def __init__(self, num_vars, num_layers, hid_dim, num_params, nonlin="leaky-relu", norm_prod='path',
-                 square_prod=False):
+                 square_prod=False,device='cpu'):
         super(LearnableModel, self).__init__(num_vars, num_layers, hid_dim, num_params, nonlin=nonlin,
-                                             norm_prod=norm_prod, square_prod=square_prod)
+                                             norm_prod=norm_prod, square_prod=square_prod,device=device)
         self.reset_params()
 
     def compute_log_likelihood(self, x, weights, biases, extra_params, detach=False):
@@ -594,18 +604,18 @@ class LearnableModel(BaseModel):
 
 class LearnableModel_NonLinGauss(LearnableModel):
     def __init__(self, num_vars, num_layers, hid_dim, nonlin="leaky-relu", norm_prod='path',
-                 square_prod=False):
+                 square_prod=False,device='cpu'):
         super(LearnableModel_NonLinGauss, self).__init__(num_vars, num_layers, hid_dim, 2, nonlin=nonlin,
-                                                         norm_prod=norm_prod, square_prod=square_prod)
+                                                         norm_prod=norm_prod, square_prod=square_prod,device=device)
 
     def get_distribution(self, dp):
         return torch.distributions.normal.Normal(dp[0], torch.exp(dp[1]))
 
 class LearnableModel_NonLinGaussANM(LearnableModel):
     def __init__(self, num_vars, num_layers, hid_dim, nonlin="leaky-relu", norm_prod='path',
-                 square_prod=False):
+                 square_prod=False,device='cpu'):
         super(LearnableModel_NonLinGaussANM, self).__init__(num_vars, num_layers, hid_dim, 1, nonlin=nonlin,
-                                                            norm_prod=norm_prod, square_prod=square_prod)
+                                                            norm_prod=norm_prod, square_prod=square_prod,device=device)
         # extra parameters are log_std
         extra_params = np.ones((self.num_vars,))
         np.random.shuffle(extra_params)  # TODO: make sure this init does not bias toward gt model
@@ -701,7 +711,10 @@ def dual_ascent_step(args, model, X, train_loader, lambda1, lambda2, rho, alpha,
         return loss
     
     def closure():
+        X.to(args.device)
+        model.to(args.device)
         optimizer.zero_grad()
+        #print([param.device for param in model.parameters()])
         X_hat = model(X)
         loss = squared_loss(X_hat, X)
         h_val = model.h_func()
@@ -752,6 +765,7 @@ def dual_ascent_step(args, model, X, train_loader, lambda1, lambda2, rho, alpha,
     optimizer = LBFGSBScipy(model.parameters())
     # X_torch = torch.from_numpy(X)
     while rho < rho_max:
+        #for i in range(5):
         if args.run_mode:
             optimizer.step(closure)  # NOTE: updates model in-place
         else:                        # NOTE: the adaptive reweight operation
@@ -966,12 +980,9 @@ def dual_ascent_step_grandag(args, model, X, train_loader, rho, alpha, h, rho_ma
         optimizer = torch.optim.RMSprop(model.parameters(), lr=args.gran_lr)
     else:
         raise NotImplementedError("optimizer {} is not implemented".format(args.gran_optim))
-    
 
     
-    
-
-
+    #print([param.device for param in model.parameters()])
     aug_lagrangians = []
     aug_lagrangian_ma = [] 
     aug_lagrangians_val = []
@@ -1015,7 +1026,7 @@ def dual_ascent_step_grandag(args, model, X, train_loader, rho, alpha, h, rho_ma
 
             if args.edge_clamp_range != 0:
                 with torch.no_grad():
-                    to_keep = (w_adj > args.edge_clamp_range).type(torch.Tensor)
+                    to_keep = (w_adj > args.edge_clamp_range).type(torch.Tensor).to(model.device)
                     model.adjacency *= to_keep
             
             if not args.no_w_adjs_log:

@@ -118,9 +118,9 @@ if __name__ == '__main__':
     ys={}
     method="notears"
     reweight="reweight"
-    setting="10_40_2000"
+    setting="10_20_2000"
 
-    path=f"/storage/wcma/DAG-NoCurl/reweight_experiment/non-linear/{setting}/ER_gp"
+    path=f"/storage/wcma/DAG-NoCurl/reweight_experiment/non-linear/{setting}/SF_gp"
     for file in os.listdir(path):
         if file.endswith(f"{method}_{reweight}.json"):
             xs.append(float(file.split("_")[1]))
