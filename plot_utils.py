@@ -159,6 +159,7 @@ if __name__ == '__main__':
             with open(abs_path) as f:
                 data=json.load(f)
             perf_str=file.split("_")[1]+"\n"
+            flag=0
             for key,value in data.items():
                 if key not in ys_ori:
                     ys_ori[key]=[[],[]]
