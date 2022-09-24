@@ -2,3 +2,6 @@
 *.pkl
 .DS_Store
 *.tar
+*.txt
+*.npy
+*.json

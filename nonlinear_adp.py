@@ -487,7 +487,7 @@ def main(trials,seed):
 
        
         #print(B_true)
-        f_dir=f'reweight_experiment/{linearity}/{args.d}_{args.s0}_{args.n}/{args.graph_type}_{sem_type}/'
+        f_dir=f'reweight_experiment/{linearity}/{args.data_type}/{args.d}_{args.s0}_{args.n}/{args.graph_type}_{sem_type}/'
         import os
         if not os.path.exists(f_dir):
             os.makedirs(f_dir)
@@ -519,7 +519,7 @@ def main(trials,seed):
         print(acc)
         # 根据args.d和args.s0生成文件夹
         
-        f_path=f'reweight_experiment/{linearity}/{args.d}_{args.s0}_{args.n}/{args.graph_type}_{sem_type}/seed_{cur_seed}.txt'
+        f_path=f'reweight_experiment/{linearity}/{args.data_type}/{args.d}_{args.s0}_{args.n}/{args.graph_type}_{sem_type}/seed_{cur_seed}.txt'
         
         # 创建该'my_experiment/{args.d}_{args.s0}/{args.graph_type}_{args.sem_type}/{args.seed}.txt'该文件
 
