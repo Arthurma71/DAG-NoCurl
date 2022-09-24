@@ -116,8 +116,10 @@ if __name__ == '__main__':
     import json
     xs=[]
     ys={}
-    method="notears"
-    reweight="_reweight"
+    method="golem"
+    temperature=20
+    reweight=f"_reweight_{temperature}"
+    #reweight="_reweight"
     setting="10_20_2000"
 
     best_shd_base=1e10
@@ -125,10 +127,13 @@ if __name__ == '__main__':
     best_shd_rescore=1e10
     best_perf_rescore=""
 
-    path=f"/storage/wcma/DAG-NoCurl/reweight_experiment/non-linear/{setting}/ER_gp"
+
+    path=f"/storage/wcma/DAG-NoCurl/reweight_experiment/linear/{setting}/ER_gauss"
     for file in os.listdir(path):
-        #if file.endswith(f"{method}_cut0.01{reweight}.json"):
-        if file.endswith(f"{method}{reweight}.json"):
+        if file.endswith(f"{method}_cut0.01{reweight}.json"):
+        #if file.endswith(f"{method}{reweight}.json"):
+            # if float(file.split("_")[1])==0.015:
+            #     continue
             xs.append(float(file.split("_")[1]))
             abs_path=os.path.join(path, file)
             with open(abs_path) as f:
@@ -152,8 +157,10 @@ if __name__ == '__main__':
     xs_ori=[]
     ys_ori={}
     for file in os.listdir(path):
-        #if file.endswith(f"{method}_cut0.01.json"):
-        if file.endswith(f"{method}.json"):
+        if file.endswith(f"{method}_cut0.01.json"):
+        #if file.endswith(f"{method}.json"):
+            # if float(file.split("_")[1])<0.001:
+            #     continue
             xs_ori.append(float(file.split("_")[1]))
             abs_path=os.path.join(path, file)
             with open(abs_path) as f:
@@ -193,7 +200,7 @@ if __name__ == '__main__':
         plt.legend()
         cnt+=1
     plt.suptitle(setting)
-    plt.savefig(os.path.join(path,"final.jpg"))
+    plt.savefig(os.path.join(path,f"final_{temperature}.jpg"))
     plt.cla()
 
     print("baseline:")
