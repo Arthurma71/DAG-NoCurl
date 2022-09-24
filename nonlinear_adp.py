@@ -522,7 +522,7 @@ def main(trials,seed):
                 model = NotearsMLP(dims=[11, 1], bias=True) # for the real data (sachs)   the nodes of sachs are 11
             else:
                 if args.linear:
-                    model = NotearsMLP(dims=[args.d, 1], bias=True)
+                    model = NotearsMLP(dims=[args.d, 1], bias=False)
                 else:
                     model = NotearsMLP(dims=[args.d, 10, 1], bias=True)
         elif args.modeltype=="golem":
@@ -604,7 +604,9 @@ def main(trials,seed):
             elif args.data_type == 'synthetic':
                 B_true = ut.simulate_dag(args.d, args.s0, args.graph_type)
                 if args.linear:
-                    X = ut.simulate_linear_sem(B_true, args.n, args.linear_sem_type)
+                    W_true=ut.simulate_parameter(B_true)
+                    X = ut.simulate_linear_sem(W_true, args.n, args.linear_sem_type)
+                    np.save(data_dir+data_name+"_W",W_true)
                 else:
                     X = ut.simulate_nonlinear_sem(B_true, args.n, args.sem_type)
                 #model = NotearsMLP(dims=[args.d, 10, 1], bias=True) # FIXME: the layer of the Notears MLP
@@ -628,7 +630,7 @@ def main(trials,seed):
 
 
 
-        adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature,device=args.device).to(args.device)
+        adaptive_model = adaptiveMLP(args.batch_size, input_size=X.shape[-1], hidden_size= X.shape[-1] , output_size=1, temperature=args.temperature,device=args.device,linear=(linearity=="linear")).to(args.device)
 
        
         #print(B_true)

@@ -10,9 +10,13 @@ import tqdm as tqdm
 
 class adaptiveMLP(nn.Module):
     # TODO: implementation ：平滑处理设计
-    def __init__(self, batch, input_size, hidden_size, output_size, temperature, bias=True,device='cpu'):
+    def __init__(self, batch, input_size, hidden_size, output_size, temperature, bias=True,device='cpu',linear=False):
         super(adaptiveMLP, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size, bias=bias)
+        self.linear=linear
+        if self.linear:
+            self.fc1 = nn.Linear(input_size, output_size, bias=bias)
+        else:
+            self.fc1 = nn.Linear(input_size, hidden_size, bias=bias)
         self.fc2 = nn.Linear(hidden_size, output_size, bias=bias)
         self.sigmoid = nn.Sigmoid()
         self.softmax = nn.Softmax(dim=0)
@@ -32,18 +36,23 @@ class adaptiveMLP(nn.Module):
 
 
     def forward(self, x):
-        # tmp = x
-        x = F.relu(self.fc1(x))
-        # x = (self.fc2(x)) + tmp
-        x = self.fc2(x)
-        x = F.relu(x)
-        # 对x进行减均值除以标准差
-        # x = self.sigmoid(x)
-        # x = x - torch.mean(x)
-        # x = x / torch.std(x)
-        gumble_G = torch.rand(x.shape[0],1).to(self.device)
-        x = x - torch.log(-torch.log(gumble_G))
-        x = self.softmax_temp(x/self.t)
+
+        if self.linear:
+            # TODO: linear design
+            x = self.fc1(x)
+            x = self.softmax_temp(x/self.t)
+        else:
+            x = F.relu(self.fc1(x))
+            # x = (self.fc2(x)) + tmp
+            x = self.fc2(x)
+            x = F.relu(x)
+            # 对x进行减均值除以标准差
+            # x = self.sigmoid(x)
+            # x = x - torch.mean(x)
+            # x = x / torch.std(x)
+            gumble_G = torch.rand(x.shape[0],1).to(self.device)
+            x = x - torch.log(-torch.log(gumble_G))
+            x = self.softmax_temp(x/self.t)
         # x = torch.abs(x)
         # x = x/torch.sum(x)
         return x
