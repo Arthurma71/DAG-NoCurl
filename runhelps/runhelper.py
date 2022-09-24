@@ -84,6 +84,14 @@ def config_parser():
                         help='path to save plot')
     parser.add_argument("--gran_patience", default=100, type=int, help="learning patience for grandag")
 
+    parser.add_argument('--pns', action="store_true",
+                        help='Run `pns` function, get /pns folder')
+    parser.add_argument('--cam-pruning', action="store_true",
+                        help='Run `cam_pruning` function, get /cam-pruning folder')
+    parser.add_argument('--pns-thresh', type=float, default=0.75,
+                        help='threshold in PNS')
+
+
 
     #Group Plot Exp
     parser.add_argument("--scaled_noise", action='store_true', help ="noise scaling varying samples")

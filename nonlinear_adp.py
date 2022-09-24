@@ -1,11 +1,14 @@
 from cProfile import run
-from cmath import inf
+from cmath import exp, inf
 from curses import curs_set
 from os import rename
 from turtle import goto
 from sympy import re
 import os
 
+from sklearn.ensemble import ExtraTreesRegressor
+from cdt.utils.R import RPackages, launch_R_script
+from sklearn.feature_selection import SelectFromModel
 from notears.trace_expm import trace_expm
 import torch
 import torch.nn as nn
@@ -15,6 +18,7 @@ import tqdm as tqdm
 from notears.loss_func import *
 import random
 import time
+from utils import *
 import igraph as ig
 import notears.utils as ut
 import torch.utils.data as data
@@ -247,6 +251,117 @@ def daggnn_nonlinear(model: nn.Module,
     hard_index, easy_index = hard_mining(args, X, model, single_loss, ratio=0.01)
     return W_est, hard_index, easy_index
 
+def pns_(model_adj, x, num_neighbors, thresh):
+    """Preliminary neighborhood selection"""
+
+    num_samples = x.shape[0]
+    num_nodes = x.shape[1]
+    print("PNS: num samples = {}, num nodes = {}".format(num_samples, num_nodes))
+    for node in range(num_nodes):
+        print("PNS: node " + str(node))
+        x_other = np.copy(x)
+        x_other[:, node] = 0
+        reg = ExtraTreesRegressor(n_estimators=500)
+        reg = reg.fit(x_other, x[:, node])
+        selected_reg = SelectFromModel(reg, threshold="{}*mean".format(thresh), prefit=True,
+                                       max_features=num_neighbors)
+        mask_selected = selected_reg.get_support(indices=False).astype(np.float)
+
+        model_adj[:, node] *= mask_selected
+
+    return model_adj
+
+def pns(model, x,  num_neighbors, thresh, exp_path):
+    # Prepare path for saving results
+    save_path = os.path.join(exp_path, f"pns_{thresh}")
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    # Check if already computed
+    if os.path.exists(os.path.join(save_path, "DAG.npy")):
+        print("pns already computed. Loading result from disk.")
+        return load(save_path, "model.pkl")
+
+    model_adj = model.adjacency.detach().cpu().numpy()
+    time0 = time.time()
+    model_adj = pns_(model_adj, x, num_neighbors, thresh)
+
+    with torch.no_grad():
+        model.adjacency.copy_(torch.Tensor(model_adj))
+
+    timing = time.time() - time0
+    print("PNS took {}s".format(timing))
+
+    # save
+    dump(model, save_path, 'model')
+    dump(timing, save_path, 'timing')
+    np.save(os.path.join(save_path, "DAG"), model.adjacency.detach().cpu().numpy())
+
+    return model
+
+def cam_pruning_(model_adj, x, cutoff, save_path, verbose=False):
+    # convert numpy data to csv, so R can access them
+    data_np = x.detach().cpu().numpy()
+    data_csv_path = np_to_csv(data_np, save_path)
+    dag_csv_path = np_to_csv(model_adj, save_path)
+
+    #dag_pruned = cam_pruning(path_data, path_dag, cutoff, verbose)
+    if not RPackages.CAM:
+        raise ImportError("R Package CAM is not available.")
+
+    arguments = dict()
+    arguments['{PATH_DATA}'] = data_csv_path
+    arguments['{PATH_DAG}'] = dag_csv_path
+    arguments['{PATH_RESULTS}'] = os.path.join(save_path, "results.csv")
+    arguments['{CUTOFF}'] = str(cutoff)
+
+    if verbose:
+        arguments['{VERBOSE}'] = "TRUE"
+    else:
+        arguments['{VERBOSE}'] = "FALSE"
+
+    def retrieve_result():
+        return pd.read_csv(arguments['{PATH_RESULTS}']).values
+
+    dag_pruned = launch_R_script("{}/cam_pruning.R".format(os.path.dirname(os.path.realpath(__file__))),
+                                     arguments, output_function=retrieve_result)
+
+    # remove the temporary csv files
+    os.remove(data_csv_path)
+    os.remove(dag_csv_path)
+
+    return dag_pruned
+
+def cam_pruning(model, x, exp_path, cutoff=0.001, verbose=False):
+    """Execute CAM pruning on a given model and datasets"""
+    time0 = time.time()
+    model.eval()
+
+    # Prepare path for saving results
+    stage_name = "cam-pruning/cutoff_%.6f" % cutoff
+    save_path = os.path.join(exp_path, stage_name)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    # Check if already computed
+    if os.path.exists(os.path.join(save_path, "DAG.npy")):
+        print(stage_name, "already computed. Loading result from disk.")
+        return np.load(os.path.join(save_path, "DAG.npy"))
+
+    model_adj = model.adjacency.detach().cpu().numpy()
+
+    dag_pruned = cam_pruning_(model_adj, x, cutoff, save_path, verbose)
+
+    # set new adjacency matrix to model
+    # model.adjacency.copy_(torch.as_tensor(dag_pruned).type(torch.Tensor))
+    # Compute SHD and SID metrics
+    np.save(os.path.join(save_path, "DAG"), dag_pruned)
+
+    return dag_pruned
+
+def file_exists(prefix, suffix):
+    return os.path.exists(os.path.join(prefix, suffix))
+
 def grandag_nonlinear(model: nn.Module,
                       adaptive_model: nn.Module,
                       X: np.ndarray,
@@ -255,71 +370,101 @@ def grandag_nonlinear(model: nn.Module,
                       h_tol: float = 1e-8,
                       rho_max: float = 1e+16,
                       w_threshold: float = 0.3,
-                      true_graph=None
+                      true_graph=None,
+                      exp_path=None
                       ):
-    rho, alpha, h = 1e-3, 0.0, np.inf
-    mus, lambdas, w_adjs= [],[],[]
-    iter_cnt=0
-    adp_flag = False
-    for j in tqdm.tqdm(range(max_iter)):
-        if j > args.reweight_epoch:
-            # TODO: reweight operation here
-            adp_flag = True
-            if not IF_baseline:
-                print("Re-weighting")
-                reweight_idx_tmp = adap_reweight_step(args,adaptive_model, train_loader, args.adaptive_lambda , model, args.adaptive_epoch, args.adaptive_lr)
-                # TODO: record the distribution
-                if IF_figure:
-                    record_distribution(reweight_idx_tmp,j)
-                
-            rho, alpha, h, mus, lambdas,w_adjs,iter_cnt= dual_ascent_step_grandag(args, model, X, train_loader,
-                                         rho, alpha, h, rho_max, adp_flag, adaptive_model,true_graph,mus,lambdas,w_adjs,iter_cnt)
-
-        else:
-            rho, alpha, h, mus, lambdas,w_adjs,iter_cnt = dual_ascent_step_grandag(args, model, X, train_loader,
-                                         rho, alpha, h, rho_max, adp_flag, adaptive_model,true_graph,mus,lambdas,w_adjs,iter_cnt)
-        
-        #print(rho," ",alpha," ",h)
-
-        # W_est = model.adjacency.detach().cpu().numpy().astype(np.float32)
-        # print(W_est)
-        # W_est[np.abs(W_est) < w_threshold] = 0
-
+    
+    if args.pns:
+        num_neighbors = args.d
+        print("Making pns folder")
+        model=pns(model, X, num_neighbors, args.pns_thresh, exp_path)
+        W_est = model.adjacency.cpu().detach().numpy().astype(np.float32)
         #acc = ut.count_accuracy(true_graph, W_est != 0)
+        print("STAGE:pns")
         #print(acc)
-        
-        if h <= h_tol or rho >= rho_max:
-            break
-    # W_est = model.get_adj()
-    # W_est[np.abs(W_est) < w_threshold] = 0
-
-    # acc = ut.count_accuracy(true_graph, W_est != 0)
-    # print(acc)
-
-    W_est_pre = model.get_w_adj().detach().cpu().numpy().astype(np.float32)
 
 
-    # Find the smallest threshold that removes all cycle-inducing edges
-    thresholds = np.unique(W_est_pre)
-    for step, t in enumerate(thresholds):
-        #print("Edges/thresh", model.adjacency.sum(), t)
-        to_keep = torch.Tensor(W_est_pre > t + 1e-8).to(model.device)
-        new_adj = model.adjacency * to_keep
-        if is_acyclic(new_adj.cpu().detach()):
-            model.adjacency.copy_(new_adj)
-            break
+    if file_exists(exp_path, f"pns_{args.pns_thresh}"):
+        print("Training with pns folder")
+        model = load(os.path.join(exp_path, f"pns_{args.pns_thresh}"), "model.pkl")
+    else:
+        print("Training from scratch")
+
+    
+
+    if os.path.exists(os.path.join(exp_path, "model.pkl")):
+        print("Train already computed. Loading result from disk.")
+        model=load(exp_path, "model.pkl")
+    else:
+        rho, alpha, h = 1e-3, 0.0, np.inf
+        mus, lambdas, w_adjs= [],[],[]
+        iter_cnt=0
+        adp_flag = False
+        for j in tqdm.tqdm(range(max_iter)):
+            if j > args.reweight_epoch:
+                # TODO: reweight operation here
+                adp_flag = True
+                if not IF_baseline:
+                    print("Re-weighting")
+                    reweight_idx_tmp = adap_reweight_step(args,adaptive_model, train_loader, args.adaptive_lambda , model, args.adaptive_epoch, args.adaptive_lr)
+                    # TODO: record the distribution
+                    if IF_figure:
+                        record_distribution(reweight_idx_tmp,j)
+                    
+                rho, alpha, h, mus, lambdas,w_adjs,iter_cnt= dual_ascent_step_grandag(args, model, X, train_loader,
+                                            rho, alpha, h, rho_max, adp_flag, adaptive_model,true_graph,mus,lambdas,w_adjs,iter_cnt)
+
+            else:
+                rho, alpha, h, mus, lambdas,w_adjs,iter_cnt = dual_ascent_step_grandag(args, model, X, train_loader,
+                                            rho, alpha, h, rho_max, adp_flag, adaptive_model,true_graph,mus,lambdas,w_adjs,iter_cnt)
+            
+            if h <= h_tol or rho >= rho_max:
+                break
+
+        W_est_pre = model.get_w_adj().detach().cpu().numpy().astype(np.float32)
+
+
+        # Find the smallest threshold that removes all cycle-inducing edges
+        thresholds = np.unique(W_est_pre)
+        for step, t in enumerate(thresholds):
+            #print("Edges/thresh", model.adjacency.sum(), t)
+            to_keep = torch.Tensor(W_est_pre > t + 1e-8).to(model.device)
+            new_adj = model.adjacency * to_keep
+            if is_acyclic(new_adj.cpu().detach()):
+                model.adjacency.copy_(new_adj)
+                break
 
     W_est = model.adjacency.cpu().detach().numpy().astype(np.float32)
-
     print(W_est)
     acc = ut.count_accuracy(true_graph, W_est != 0)
+    print("STAGE:train")
+    dump(model, exp_path, 'model')
     print(acc)
 
+    if args.cam_pruning:
+        best_shd=acc['shd']
+        best_W=W_est
+        prune_stats={-1:acc}
+        # if opt.cam_pruning is iterable, extract the different cutoffs, otherwise use only the cutoff specified
+        for cutoff in [1e-3,5e-3,1e-2,5e-2,1e-1,2e-1,3e-1]:
+            # run
+            dag_pruned = cam_pruning(model, X, exp_path, cutoff=cutoff)
+            acc=ut.count_accuracy(true_graph, dag_pruned!=0)
+            prune_stats[cutoff]=acc
+            if acc['shd']<best_shd:
+                best_shd=acc['shd']
+                best_W=dag_pruned
+            print(f"STAGE: cam_pruning_{cutoff}")
+            print(acc)
+        with open(os.path.join(exp_path, "pruning_stat.json"),'w') as f:
+            json.dump(prune_stats,f)
+        model.adjacency.copy_(torch.as_tensor(best_W).type(torch.Tensor))
+        W_est=best_W
+        
     
     # TODO: 打印fit不好的结果和相关信息
     hard_index, easy_index = hard_mining(args, X, model, single_loss, ratio=0.01)
     return W_est, hard_index, easy_index
-
 
 
 def set_random_seed(seed):
@@ -328,7 +473,6 @@ def set_random_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
-
 
 def ensureDir(dir_path):
     d = os.path.dirname(dir_path)
@@ -357,12 +501,11 @@ def hard_mining(args, data, model, loss_func, ratio = 0.01):
     easy_index_list = np.argsort(loss_col)[:int(N_sample * ratio)]
     return hard_index_list, easy_index_list
 
-
-
 def main(trials,seed):
     # fangfu
 
     tot_perf={}
+    reweight_str=f"_reweight_{args.temperature}" if not IF_baseline else ""
     for trial in range(trials):
         print('==' * 20)
 
@@ -508,8 +651,9 @@ def main(trials,seed):
         elif args.modeltype=='daggnn':
             W_est , _, _= daggnn_nonlinear(model, adaptive_model, X, train_loader,true_graph=B_true)
         elif args.modeltype=='grandag':
-            W_est , _, _= grandag_nonlinear(model, adaptive_model, X, train_loader,true_graph=B_true)
-
+            gran_dir=f_dir+"grandag"+reweight_str+f"/seed_{cur_seed}"
+            ensureDir(gran_dir+'/')
+            W_est , _, _= grandag_nonlinear(model, adaptive_model, X, train_loader,true_graph=B_true,exp_path=gran_dir)
 
         #assert ut.is_dag(W_est)
         # np.savetxt('W_est.csv', W_est, delimiter=',')
@@ -546,7 +690,7 @@ def main(trials,seed):
         tot_perf[key]['mean']=float(np.mean(perf))
         tot_perf[key]['std']=float(np.std(perf))
     
-    reweight_str="_reweight" if not IF_baseline else ""
+    
     with open(f_dir+"stats_"+str(args.lambda1)+"_"+str(args.lambda2)+"_"+args.modeltype+reweight_str+".json",'w') as f:
         json.dump(tot_perf,f)
 
