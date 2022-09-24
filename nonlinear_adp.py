@@ -259,10 +259,10 @@ def pns_(model_adj, x, num_neighbors, thresh):
     print("PNS: num samples = {}, num nodes = {}".format(num_samples, num_nodes))
     for node in range(num_nodes):
         print("PNS: node " + str(node))
-        x_other = np.copy(x)
+        x_other = np.copy(x.cpu())
         x_other[:, node] = 0
         reg = ExtraTreesRegressor(n_estimators=500)
-        reg = reg.fit(x_other, x[:, node])
+        reg = reg.fit(x_other, x[:, node].cpu())
         selected_reg = SelectFromModel(reg, threshold="{}*mean".format(thresh), prefit=True,
                                        max_features=num_neighbors)
         mask_selected = selected_reg.get_support(indices=False).astype(np.float)
@@ -506,6 +506,8 @@ def main(trials,seed):
 
     tot_perf={}
     reweight_str=f"_reweight_{args.temperature}" if not IF_baseline else ""
+    device=torch.device(args.device)
+    args.device=device
     for trial in range(trials):
         print('==' * 20)
 
