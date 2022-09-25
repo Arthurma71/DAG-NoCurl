@@ -116,24 +116,23 @@ if __name__ == '__main__':
     import json
     xs=[]
     ys={}
-    method="golem"
-    temperature=20
-    reweight=f"_reweight_{temperature}"
+    method="notears"# TODO: change this
+    temperature=40  # TODO: change this
+    reweight=f"_reweight_{temperature}"# TODO: change this
     #reweight="_reweight"
-    setting="10_20_2000"
+    setting="10_40_2000"# TODO: change this
 
     best_shd_base=1e10
     best_perf_base=""
     best_shd_rescore=1e10
     best_perf_rescore=""
 
+    prefix = 'rs_expt_t_40_bs_500'# TODO: change this
 
-    path=f"/storage/wcma/DAG-NoCurl/reweight_experiment/linear/{setting}/ER_gauss"
+    path=f"{prefix}/linear/synthetic/{setting}/SF_gauss"# TODO: change this
     for file in os.listdir(path):
-        if file.endswith(f"{method}_cut0.01{reweight}.json"):
-        #if file.endswith(f"{method}{reweight}.json"):
-            # if float(file.split("_")[1])==0.015:
-            #     continue
+        #if file.endswith(f"{method}_cut0.01{reweight}.json"):
+        if file.endswith(f"{method}{reweight}.json"):
             xs.append(float(file.split("_")[1]))
             abs_path=os.path.join(path, file)
             with open(abs_path) as f:
@@ -157,10 +156,8 @@ if __name__ == '__main__':
     xs_ori=[]
     ys_ori={}
     for file in os.listdir(path):
-        if file.endswith(f"{method}_cut0.01.json"):
-        #if file.endswith(f"{method}.json"):
-            # if float(file.split("_")[1])<0.001:
-            #     continue
+        #if file.endswith(f"{method}_cut0.01.json"):
+        if file.endswith(f"{method}.json"):
             xs_ori.append(float(file.split("_")[1]))
             abs_path=os.path.join(path, file)
             with open(abs_path) as f:
@@ -189,7 +186,7 @@ if __name__ == '__main__':
     plt.figure(figsize=(16,8))
     cnt=0
     for key,item in ys.items():
-        plt.subplot(f"23{cnt}")
+        plt.subplot(2,3,cnt+1)
         means=np.array(item[0])[idx]
         stds=np.array(item[1])[idx]
         means_ori=np.array(ys_ori[key][0])[idx_ori]
@@ -200,13 +197,12 @@ if __name__ == '__main__':
         plt.legend()
         cnt+=1
     plt.suptitle(setting)
-    plt.savefig(os.path.join(path,f"final_{temperature}.jpg"))
+    plt.savefig(os.path.join(path,"final.jpg"))
     plt.cla()
 
     print("baseline:")
     print(best_perf_base)
     print("rescore:")
     print(best_perf_rescore)
-        
 
         
