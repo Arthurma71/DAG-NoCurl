@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-
-# fangfu: loss function 
 def squared_loss(output, target):
     n = target.shape[0]
     loss = 0.5 / n * torch.sum((output - target) ** 2)
