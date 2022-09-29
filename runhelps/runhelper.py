@@ -9,7 +9,7 @@ def config_parser():
     parser.add_argument('--modeltype',default="notears",choices=['notears','golem','daggnn','grandag'])
 
     parser.add_argument("--s0", default=60, type=int)
-    parser.add_argument("--d", default=20, type=int) # 如果是10 下面的n就是1000, 如果是20就是2000, 如果d>50, n最好加大
+    parser.add_argument("--d", default=20, type=int) 
     parser.add_argument("--n", default=1000, type=int)
     parser.add_argument("--sem_type", default="gp", choices=["gp-add","mlp", "gp", "mim"])
     parser.add_argument("--linear_sem_type", default="gauss", choices=["gauss","exp", "gumbel", "uniform","logistic","poisson"])
@@ -29,8 +29,6 @@ def config_parser():
     parser.add_argument("--data_type", default='synthetic', type=str, help = 'real or synthetic', choices=['real', 'synthetic','testing', 'sachs_full'])#'synthetic_gran'])
     parser.add_argument("--linear", action='store_true', help ="whether to use linear synthetic data")
 
-
-    # TODO: add the arguments for adapitve reweight ， 默认fit好的参数，t = 20, 10, batch=200, adaptive_epoch=10
     # add the batch_size
     parser.add_argument("--run_mode", type = int, default=1, help ="run baseline or reweight operation")
     parser.add_argument("--figure", action='store_true', help ="record weight distribution")
