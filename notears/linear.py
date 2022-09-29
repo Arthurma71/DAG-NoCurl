@@ -25,7 +25,6 @@ def notears_linear(X, lambda1, loss_type, max_iter=100, h_tol=1e-8, rho_max=1e+1
     """
     def _loss(W):
         """Evaluate value and gradient of loss."""
-        """定义损失函数并且计算损失函数的值和梯度"""
         M = X @ W  
         if loss_type == 'l2':
             R = X - M
